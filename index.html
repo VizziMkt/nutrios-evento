@@ -14,6 +14,9 @@
 @media(max-width:650px){.wrap{width:min(100% - 32px,1160px)}.site-header{padding:16px 0}.logo{width:145px}.site-header .btn{font-size:11px;padding:10px 13px;min-height:40px}.hero{padding:46px 0 76px;gap:34px}.overline{font-size:10px;line-height:1.65}.hero h1{font-size:45px}.hero p{font-size:16px}.hero .btn{width:100%}.app-tag{left:12px;font-size:10px;padding:10px}.section,.signup{padding:64px 0}.benefits{grid-template-columns:1fr;gap:12px;margin-top:28px}.benefit{padding:22px}.product-grid,.founder-grid,.signup-grid{gap:28px}.founder-photo{min-height:380px}.form-card{padding:24px 18px}.options{grid-template-columns:1fr}footer .wrap{align-items:start;flex-direction:column}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn{transition:none}}
 </style>
+<!-- Talkify Analytics: pageviews, campanhas e origem de tráfego -->
+<script async src="https://bzthazimzbqwtimotxdl.supabase.co/functions/v1/analytics-widget?site=9ac5ccc2-3d6f-485d-95cd-5aad805082e1&amp;v=v1"></script>
+<!-- Fim Talkify Analytics -->
 </head>
 <body>
 <div class="dark" id="inicio">
@@ -109,43 +112,53 @@
 <footer><div class="wrap"><span><b>NutriOS</b> — Seu consultório completo. Em um só lugar.</span><span>Uma plataforma pensada para a rotina de quem cuida.</span></div></footer>
 <script>
 (function(){
- // PENDENTE: informe o endpoint HTTPS de captura do Talkify quando estiver disponível.
- // Nunca coloque tokens privados, chaves secretas ou credenciais no HTML público.
- const TALKIFY_PUBLIC_ENDPOINT = '';
- const params=new URLSearchParams(location.search);
- const origem=params.get('utm_source') || params.get('origem') || 'evento-28-novembro';
- document.getElementById('origem').value=origem.slice(0,90);
- const form=document.getElementById('nutrios-form');
- const feedback=document.getElementById('form-message');
- const submitButton=form.querySelector('button[type="submit"]');
- form.addEventListener('submit',async function(e){
-   e.preventDefault();
-   if(!form.checkValidity()){form.reportValidity();return;}
-   feedback.classList.add('active');
-   if(!/^https:\/\//i.test(TALKIFY_PUBLIC_ENDPOINT.trim())){
-     feedback.textContent='O cadastro está em configuração. Por favor, tente novamente após a ativação do formulário.';
-     return;
-   }
-   const payload=Object.fromEntries(new FormData(form).entries());
-   submitButton.disabled=true;
-   feedback.textContent='Enviando sua inscrição...';
-   try{
-     // Integração genérica: o formato exato (payload/headers/resposta) deverá ser
-     // ajustado depois de receber a documentação do Talkify.
-     const response=await fetch(TALKIFY_PUBLIC_ENDPOINT,{
-       method:'POST',
-       headers:{'Content-Type':'application/json'},
-       body:JSON.stringify(payload),
-       mode:'cors'
-     });
-     if(!response.ok) throw new Error('Falha ao salvar lead');
-     const target=payload.perfil==='personal' ? '/personal/' : '/obrigado/';
-     window.location.assign(target);
-   } catch(error){
-     feedback.textContent='Não foi possível concluir sua inscrição. Confira sua conexão e tente novamente.';
-     submitButton.disabled=false;
-   }
- });
+  const form=document.getElementById('nutrios-form');
+  const feedback=document.getElementById('form-message');
+  const submitButton=form.querySelector('button[type="submit"]');
+  const params=new URLSearchParams(location.search);
+  const keys=['utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id','gclid','fbclid','msclkid','ttclid','origem'];
+  const attribution={};
+  try { Object.assign(attribution,JSON.parse(sessionStorage.getItem('nutrios_attribution')||'{}')); } catch(e){}
+  for(const key of keys){ const val=params.get(key); if(val) attribution[key]=val.slice(0,250); }
+  if(!attribution.landing_page) attribution.landing_page=location.href.split('#')[0].slice(0,1800);
+  if(!attribution.referrer) attribution.referrer=document.referrer.slice(0,1800);
+  attribution.page_url=location.href.split('#')[0].slice(0,1800);
+  attribution.origem=attribution.origem||attribution.utm_source||'evento-28-novembro';
+  document.getElementById('origem').value=attribution.origem.slice(0,90);
+  try{sessionStorage.setItem('nutrios_attribution',JSON.stringify(attribution));}catch(e){}
+  let pending=false;
+  form.addEventListener('submit',async function(e){
+    e.preventDefault();
+    if(pending) return;
+    if(!form.checkValidity()){form.reportValidity();return;}
+    const raw=Object.fromEntries(new FormData(form).entries());
+    const perfil=raw.perfil==='personal'?'personal':'nutricionista';
+    const payload={
+      nome:raw.nome.trim(), telefone:raw.telefone.trim(), email:raw.email.trim(),
+      perfil, origem:attribution.origem, consentimento:!!form.elements.consentimento.checked,
+      ...attribution
+    };
+    pending=true;
+    submitButton.disabled=true;
+    feedback.classList.add('active');
+    feedback.textContent='Enviando sua inscrição...';
+    try{
+      const response=await fetch('/api/lead',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        credentials:'same-origin',body:JSON.stringify(payload)
+      });
+      if(!response.ok){throw new Error('Falha no recebimento do cadastro');}
+      let result={};
+      try{result=await response.json();}catch(e){throw new Error('Resposta inválida');}
+      if(result.success!==true) throw new Error('Cadastro não confirmado');
+      try{sessionStorage.setItem('nutrios_conversion_pending',JSON.stringify({perfil,origem:attribution.origem}));}catch(e){}
+      window.location.assign(perfil==='personal'?'/personal/':'/obrigado/');
+    } catch(error){
+      feedback.textContent='Não foi possível concluir sua inscrição agora. Por favor, tente novamente.';
+      submitButton.disabled=false;
+      pending=false;
+    }
+  });
 })();
 </script>
 </body>
